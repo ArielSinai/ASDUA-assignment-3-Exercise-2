@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional
+
+
+def make_cache_key(*parts: Any) -> str:
+    """
+    Make a stable string cache key from parts.
+    Keep it simple + deterministic for this assignment.
+    """
+    return "|".join(str(p) for p in parts)
 
 
 @dataclass
@@ -31,7 +39,6 @@ class TTLCache:
             return None
 
         if now >= entry.expires_at:
-            # expired → remove
             del self._store[key]
             return None
 
