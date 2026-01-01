@@ -6,7 +6,7 @@ def test_allows_within_limits():
     rl = RateLimiter(per_second=2, per_hour=10, per_day=100)
 
     rl.acquire("serpapi", now=0.00)
-    rl.acquire("serpapi", now=0.10)  # 2 calls in same second => ok
+    rl.acquire("serpapi", now=0.10)  
 
 
 def test_blocks_third_call_same_second():
@@ -48,12 +48,11 @@ def test_resets_second_window():
     rl.acquire("x", now=0.10)
     rl.acquire("x", now=0.20)
 
-    # new second window
-    rl.acquire("x", now=1.05)  # should not raise
+    rl.acquire("x", now=1.05) 
 
 
 def test_independent_keys():
     rl = RateLimiter(per_second=1, per_hour=10, per_day=100)
 
     rl.acquire("serpapi", now=0.1)
-    rl.acquire("alpaca", now=0.2)  # different key => should be allowed
+    rl.acquire("alpaca", now=0.2)  

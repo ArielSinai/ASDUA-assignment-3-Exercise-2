@@ -1,4 +1,3 @@
-# algotrader/core/rate_limiter.py
 
 from __future__ import annotations
 
@@ -49,7 +48,7 @@ class RateLimiter:
         self.per_hour = int(per_hour)
         self.per_day = int(per_day)
 
-        # key -> counters for each window
+        
         self._sec: Dict[str, _BucketCounter] = {}
         self._hour: Dict[str, _BucketCounter] = {}
         self._day: Dict[str, _BucketCounter] = {}
