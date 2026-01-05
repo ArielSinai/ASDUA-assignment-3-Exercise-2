@@ -15,3 +15,6 @@ class BarsToPricesAdapter:
             return []
         bars = self._inner.get_bars(symbol=symbol, timeframe=self._timeframe, limit=limit)
         return [float(b.close) for b in bars]
+
+    def get_latest_price(self, symbol: str) -> float:
+        return float(self._inner.get_latest_price(symbol))
