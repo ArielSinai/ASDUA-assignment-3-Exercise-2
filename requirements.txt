@@ -1,0 +1,6 @@
+pytest
+requests
+crewai
+litellm
+alpaca-py
+python-dotenv
