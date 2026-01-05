@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, List, Sequence, Optional
 
 from algotrader.agents.market_agent import MarketAgent
 from algotrader.agents.risk_agent import RiskAgent
 from algotrader.agents.exec_agent import ExecAgent
 
-from algotrader.core.config import ALPACA_API_KEY, ALPACA_SECRET_KEY
+from algotrader.core.config import (
+    ALPACA_API_KEY,
+    ALPACA_SECRET_KEY,
+    BACKTEST_START,
+    BACKTEST_END,
+    BACKTEST_TIMEFRAME,
+)
+
 from algotrader.backtest.backtest_market_data import BacktestMarketData
 from algotrader.backtest.backtest_execution import BacktestExecutionClient
-from algotrader.backtest.alpaca_history import fetch_prices_by_symbol, make_week_window_utc
+from algotrader.backtest.alpaca_history import fetch_prices_by_symbol, make_week_window_utc, BacktestWindow
 from algotrader.market.market_data_alpaca import AlpacaMarketDataClient
 
 
@@ -75,22 +83,31 @@ def run_backtest(
     )
 
 
+def _parse_iso_dt(s: str) -> datetime:
+    return datetime.fromisoformat(s)
+
+
 def main() -> None:
     symbols = ["PLTR", "NFLX", "PLTK"]
-
     use_alpaca = bool(ALPACA_API_KEY and ALPACA_SECRET_KEY)
 
     if use_alpaca:
         md = AlpacaMarketDataClient(api_key=ALPACA_API_KEY, api_secret=ALPACA_SECRET_KEY)
-        window = make_week_window_utc(days=7)
+
+        if BACKTEST_START and BACKTEST_END:
+            window = BacktestWindow(start=_parse_iso_dt(BACKTEST_START), end=_parse_iso_dt(BACKTEST_END))
+            source = f"Alpaca ({BACKTEST_START} to {BACKTEST_END}, {BACKTEST_TIMEFRAME})"
+        else:
+            window = make_week_window_utc(days=7)
+            source = f"Alpaca (last 7 days, {BACKTEST_TIMEFRAME})"
+
         prices = fetch_prices_by_symbol(
             md=md,
             symbols=symbols,
             window=window,
-            timeframe="1Hour",
+            timeframe=BACKTEST_TIMEFRAME,
             limit=1000,
         )
-        source = "Alpaca (last 7 days, 1Hour bars)"
     else:
         prices = {
             "PLTR": [1.0, 2.0, 3.0, 2.0, 1.0],
