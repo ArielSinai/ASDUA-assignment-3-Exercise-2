@@ -21,6 +21,8 @@ from algotrader.core.config import (
     NEWS_CACHE_TTL_SECONDS,
     NEWS_LOOKBACK_DAYS,
     NEWS_LIMIT,
+    NEWS_STRONG_THRESHOLD,
+    NEWS_MIN_CONF_FOR_SIGNAL,
 )
 from algotrader.core.rate_limiter import RateLimiter
 from algotrader.data.news_data import NewsItem, StubNewsDataClient
@@ -173,13 +175,20 @@ def main() -> None:
     )
 
     market_agent = MarketAgent(md, short_window=5, long_window=20, threshold=0.001)
-    news_agent = NewsAgent(news_client, lookback_days=int(NEWS_LOOKBACK_DAYS), limit=int(NEWS_LIMIT))
+    news_agent = NewsAgent(
+        news_client,
+        lookback_days=int(NEWS_LOOKBACK_DAYS),
+        limit=int(NEWS_LIMIT),
+        strong_threshold=float(NEWS_STRONG_THRESHOLD),
+        min_confidence_for_signal=float(NEWS_MIN_CONF_FOR_SIGNAL),
+    )
     risk_agent = RiskAgent(max_position_pct=0.25)
     exec_agent = ExecAgent(execution=exec_client, risk=risk_agent)
 
     cooldowns: dict[str, float] = {}
     trade_value_usd = 1000.0
 
+    LOG.info("NewsAgent config: strong_threshold=%.2f min_confidence=%.2f", float(NEWS_STRONG_THRESHOLD), float(NEWS_MIN_CONF_FOR_SIGNAL))
     LOG.info("Execution client: %s", type(exec_client).__name__)
     LOG.info("Market data: %s", type(md).__name__)
     LOG.info("Starting agent_trader loop. Ctrl+C to exit.")
@@ -206,10 +215,41 @@ def main() -> None:
 
             if tpsl is not None:
                 signal = tpsl
+                LOG.info("TP/SL decision: sym=%s latest=%.4f action=%s reason=%s", sym, float(latest_price), signal.action, signal.reason)
             else:
-                market_signal = market_agent.analyze(sym)
-                insight = news_agent.analyze(sym)
-                signal = _combine_market_and_news(market_signal, insight.sentiment, insight.confidence)
+                now_dt = datetime.now(timezone.utc)
+
+                insight = news_agent.analyze(sym, as_of=now_dt)
+                LOG.info(
+                    "News insight: sym=%s sentiment=%.2f confidence=%.2f reason=%s",
+                    sym,
+                    float(insight.sentiment),
+                    float(insight.confidence),
+                    insight.reason,
+                )
+
+                news_sig = news_agent.generate_signal(sym, as_of=now_dt)
+                LOG.info(
+                    "News signal: sym=%s action=%s conf=%.2f reason=%s",
+                    sym,
+                    news_sig.action,
+                    float(news_sig.confidence),
+                    news_sig.reason,
+                )
+
+                if news_sig.action != "HOLD":
+                    signal = news_sig
+                else:
+                    market_sig = market_agent.analyze(sym)
+                    LOG.info(
+                        "Market signal: sym=%s action=%s conf=%.2f reason=%s",
+                        market_sig.symbol,
+                        market_sig.action,
+                        float(market_sig.confidence),
+                        market_sig.reason,
+                    )
+                    insight2 = news_agent.analyze(sym, as_of=now_dt)
+                    signal = _combine_market_and_news(market_sig, insight2.sentiment, insight2.confidence)
 
             if signal.action == "BUY":
                 position_value = 0.0 if pos is None else float(pos.qty) * float(pos.avg_entry_price)
@@ -230,6 +270,9 @@ def main() -> None:
             if res.executed:
                 cooldowns[sym] = time.time() + float(COOLDOWN_SECONDS)
             LOG.info("Exec: %s", res)
+
+            if (not res.executed) and ("insufficient qty available" in res.reason.lower()):
+                cooldowns[sym] = time.time() + float(COOLDOWN_SECONDS)
 
             portfolio2 = exec_client.get_portfolio()
             LOG.info(
