@@ -23,11 +23,44 @@ from algotrader.market.market_data_alpaca import AlpacaMarketDataClient
 
 
 @dataclass(frozen=True)
+class BacktestMetrics:
+    return_pct: float
+    max_drawdown_pct: float
+
+
+@dataclass(frozen=True)
 class BacktestResult:
     start_equity: float
     end_equity: float
     trades_executed: int
     equity_curve: List[float]
+    metrics: BacktestMetrics
+
+
+def _parse_iso_dt(s: str) -> datetime:
+    return datetime.fromisoformat(s)
+
+
+def compute_metrics(equity_curve: Sequence[float]) -> BacktestMetrics:
+    if not equity_curve:
+        return BacktestMetrics(return_pct=0.0, max_drawdown_pct=0.0)
+
+    start = float(equity_curve[0])
+    end = float(equity_curve[-1])
+    return_pct = 0.0 if start == 0 else ((end - start) / start) * 100.0
+
+    peak = float(equity_curve[0])
+    max_dd = 0.0
+    for v in equity_curve:
+        v = float(v)
+        if v > peak:
+            peak = v
+        if peak > 0:
+            dd = (peak - v) / peak
+            if dd > max_dd:
+                max_dd = dd
+
+    return BacktestMetrics(return_pct=float(return_pct), max_drawdown_pct=float(max_dd * 100.0))
 
 
 def run_backtest(
@@ -52,8 +85,8 @@ def run_backtest(
     if max_steps is not None:
         steps = min(steps, int(max_steps))
 
-    start_equity = ex.get_portfolio().equity
-    equity_curve: List[float] = [float(start_equity)]
+    start_equity = float(ex.get_portfolio().equity)
+    equity_curve: List[float] = [start_equity]
     trades = 0
 
     for i in range(steps):
@@ -75,16 +108,15 @@ def run_backtest(
         equity_curve.append(float(ex.get_portfolio().equity))
 
     end_equity = float(ex.get_portfolio().equity)
+    metrics = compute_metrics(equity_curve)
+
     return BacktestResult(
-        start_equity=float(start_equity),
-        end_equity=float(end_equity),
+        start_equity=start_equity,
+        end_equity=end_equity,
         trades_executed=int(trades),
         equity_curve=equity_curve,
+        metrics=metrics,
     )
-
-
-def _parse_iso_dt(s: str) -> datetime:
-    return datetime.fromisoformat(s)
 
 
 def main() -> None:
@@ -128,11 +160,13 @@ def main() -> None:
     )
 
     print("Backtest result:")
-    print(f"  source       = {source}")
-    print(f"  start_equity = {result.start_equity:.2f}")
-    print(f"  end_equity   = {result.end_equity:.2f}")
-    print(f"  trades       = {result.trades_executed}")
-    print(f"  curve_len    = {len(result.equity_curve)}")
+    print(f"  source           = {source}")
+    print(f"  start_equity     = {result.start_equity:.2f}")
+    print(f"  end_equity       = {result.end_equity:.2f}")
+    print(f"  return_pct       = {result.metrics.return_pct:.3f}%")
+    print(f"  max_drawdown_pct = {result.metrics.max_drawdown_pct:.3f}%")
+    print(f"  trades           = {result.trades_executed}")
+    print(f"  curve_len        = {len(result.equity_curve)}")
 
 
 if __name__ == "__main__":
