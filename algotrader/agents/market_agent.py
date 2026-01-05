@@ -28,7 +28,8 @@ class MarketAgent:
 
     def analyze(self, symbol: str) -> MarketSignal:
         lookback = max(self.short_window, self.long_window)
-        prices: List[float] = self._md.get_recent_prices(symbol, lookback=lookback)
+        prices: List[float] = self._md.get_recent_prices(symbol, lookback)
+
 
         if len(prices) < self.long_window:
             return MarketSignal(

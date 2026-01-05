@@ -31,16 +31,35 @@ class ExecAgent:
 
         decision = self._risk.evaluate(
             symbol=signal.symbol,
-            equity=portfolio.cash + sum(p.qty * p.avg_entry_price for p in portfolio.positions.values()),
+            equity=portfolio.equity,
             position_value=position_value,
             proposed_trade_value=proposed,
         )
 
         if not decision.allow_trade:
-            return ExecResult(False, decision.reason)
+            return ExecResult(False, f"Risk blocked: {decision.reason}")
 
-        # For now qty is trade_value/1.0 because stub price=1.0
-        qty = trade_value / 1.0
+        if signal.action == "SELL" and (pos is None or pos.qty <= 0):
+            return ExecResult(False, "No position to sell")
+
         side = "buy" if signal.action == "BUY" else "sell"
-        self._exec.submit_market_order(signal.symbol, qty=qty, side=side)
-        return ExecResult(True, f"Executed {side} {qty:.2f} {signal.symbol}")
+
+        try:
+            resp = self._exec.submit_market_order(
+                signal.symbol,
+                qty=trade_value,
+                side=side,
+            )
+
+            if isinstance(resp, dict):
+                oid = resp.get("order_id")
+                st = resp.get("status")
+                return ExecResult(
+                    True,
+                    f"Submitted {side} ${trade_value:.2f} {signal.symbol} (order_id={oid}, status={st})",
+                )
+
+            return ExecResult(True, f"Executed {side} {trade_value:.2f} {signal.symbol}")
+
+        except Exception as e:
+            return ExecResult(False, f"Execution error: {e}")

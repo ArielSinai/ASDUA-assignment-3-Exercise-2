@@ -14,11 +14,13 @@ class Position:
 @dataclass(frozen=True)
 class Portfolio:
     cash: float
+    equity: float
     positions: Dict[str, Position]
 
 
 class ExecutionClient(Protocol):
     def get_portfolio(self) -> Portfolio: ...
     def get_position(self, symbol: str) -> Optional[Position]: ...
-    def submit_market_order(self, symbol: str, qty: float, side: str) -> None:  # side: "buy"|"sell"
+    def submit_market_order(self, symbol: str, qty: float, side: str) -> object:
         ...
+

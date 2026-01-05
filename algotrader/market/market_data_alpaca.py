@@ -9,15 +9,6 @@ from .market_data_client import Bar, MarketDataClient
 
 
 class AlpacaMarketDataClient(MarketDataClient):
-    """
-    Minimal Alpaca Market Data client (REST).
-
-    Env:
-      ALPACA_API_KEY
-      ALPACA_API_SECRET
-      ALPACA_DATA_BASE_URL (optional) default: https://data.alpaca.markets
-    """
-
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -26,17 +17,16 @@ class AlpacaMarketDataClient(MarketDataClient):
         timeout_seconds: float = 10.0,
     ) -> None:
         self._api_key = api_key or os.getenv("ALPACA_API_KEY", "")
-        self._api_secret = api_secret or os.getenv("ALPACA_API_SECRET", "")
+        self._api_secret = api_secret or os.getenv("ALPACA_SECRET_KEY", "") or os.getenv("ALPACA_API_SECRET", "")
         self._base_url = (base_url or os.getenv("ALPACA_DATA_BASE_URL", "https://data.alpaca.markets")).rstrip("/")
         self._timeout = timeout_seconds
 
         if not self._api_key or not self._api_secret:
-            raise ValueError("Missing ALPACA_API_KEY / ALPACA_API_SECRET")
+            raise ValueError("Missing ALPACA_API_KEY / ALPACA_SECRET_KEY (or ALPACA_API_SECRET)")
 
     def get_latest_price(self, symbol: str) -> float:
         url = f"{self._base_url}/v2/stocks/{symbol}/trades/latest"
         data = self._get(url, params={})
-        # response shape: {"trade": {"p": price, ...}}
         return float(data["trade"]["p"])
 
     def get_bars(
