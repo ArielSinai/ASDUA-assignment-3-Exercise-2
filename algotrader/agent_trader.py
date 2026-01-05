@@ -17,9 +17,14 @@ from algotrader.core.config import (
     MAX_EXISTING_POSITION_PCT_TO_ADD,
     STOP_LOSS_PCT,
     TAKE_PROFIT_PCT,
+    USE_REAL_NEWS,
+    NEWS_CACHE_TTL_SECONDS,
+    NEWS_LOOKBACK_DAYS,
+    NEWS_LIMIT,
 )
 from algotrader.core.rate_limiter import RateLimiter
 from algotrader.data.news_data import NewsItem, StubNewsDataClient
+from algotrader.data.news_data_alpaca import AlpacaNewsDataClient
 from algotrader.data.news_data_wrapped import CachedRateLimitedNewsDataClient
 from algotrader.execution.execution_alpaca import AlpacaExecutionClient
 from algotrader.execution.execution_stub import StubExecutionClient
@@ -132,32 +137,43 @@ def main() -> None:
 
     md = BarsToPricesAdapter(cached_bars_md, timeframe="1Min", limit=60)
 
-    now = datetime.now(timezone.utc)
+    as_of = datetime.now(timezone.utc)
     stub_news_items = {
         "PLTR": [
-            NewsItem("PLTR", now - timedelta(days=1), "Palantir wins new government contract", 0.4),
-            NewsItem("PLTR", now - timedelta(days=2), "Analysts raise outlook on PLTR", 0.3),
+            NewsItem("PLTR", as_of - timedelta(days=1), "Stub: PLTR positive", 0.4),
+            NewsItem("PLTR", as_of - timedelta(days=2), "Stub: PLTR positive", 0.3),
         ],
         "NFLX": [
-            NewsItem("NFLX", now - timedelta(days=1), "Netflix faces subscriber slowdown concerns", -0.3),
-            NewsItem("NFLX", now - timedelta(days=3), "Mixed reviews for new Netflix series lineup", -0.1),
+            NewsItem("NFLX", as_of - timedelta(days=1), "Stub: NFLX negative", -0.3),
+            NewsItem("NFLX", as_of - timedelta(days=3), "Stub: NFLX negative", -0.1),
         ],
         "PLTK": [
-            NewsItem("PLTK", now - timedelta(days=2), "Playtika announces new mobile game release", 0.2),
+            NewsItem("PLTK", as_of - timedelta(days=2), "Stub: PLTK neutral", 0.0),
         ],
     }
 
-    news_stub = StubNewsDataClient(stub_news_items)
+    if USE_REAL_NEWS:
+        try:
+            news_inner = AlpacaNewsDataClient(api_key=ALPACA_API_KEY, api_secret=ALPACA_SECRET_KEY)
+            LOG.info("News data: AlpacaNewsDataClient")
+        except Exception as e:
+            LOG.warning("Real news disabled (fallback to stub). reason=%s", e)
+            news_inner = StubNewsDataClient(stub_news_items)
+            LOG.info("News data: StubNewsDataClient")
+    else:
+        news_inner = StubNewsDataClient(stub_news_items)
+        LOG.info("News data: StubNewsDataClient")
+
     news_client = CachedRateLimitedNewsDataClient(
-        inner=news_stub,
+        inner=news_inner,
         cache=cache,
         rate_limiter=rl,
-        cache_ttl_seconds=300.0,
+        cache_ttl_seconds=float(NEWS_CACHE_TTL_SECONDS),
         limiter_key_prefix="news",
     )
 
     market_agent = MarketAgent(md, short_window=5, long_window=20, threshold=0.001)
-    news_agent = NewsAgent(news_client, lookback_days=7, limit=10)
+    news_agent = NewsAgent(news_client, lookback_days=int(NEWS_LOOKBACK_DAYS), limit=int(NEWS_LIMIT))
     risk_agent = RiskAgent(max_position_pct=0.25)
     exec_agent = ExecAgent(execution=exec_client, risk=risk_agent)
 
@@ -199,7 +215,12 @@ def main() -> None:
                 position_value = 0.0 if pos is None else float(pos.qty) * float(pos.avg_entry_price)
                 pct = _position_value_pct(equity=float(portfolio.equity), position_value=position_value)
                 if pos is not None and pos.qty > 0 and pct >= float(MAX_EXISTING_POSITION_PCT_TO_ADD):
-                    LOG.info("Exec: Skipped BUY (%s position_pct=%.3f >= %.3f)", sym, pct, float(MAX_EXISTING_POSITION_PCT_TO_ADD))
+                    LOG.info(
+                        "Exec: Skipped BUY (%s position_pct=%.3f >= %.3f)",
+                        sym,
+                        pct,
+                        float(MAX_EXISTING_POSITION_PCT_TO_ADD),
+                    )
                     cooldowns[sym] = time.time() + float(COOLDOWN_SECONDS)
                     continue
 

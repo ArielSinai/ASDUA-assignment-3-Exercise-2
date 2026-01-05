@@ -21,6 +21,16 @@ def _get_float(name: str, default: float) -> float:
         return default
 
 
+def _get_int(name: str, default: int) -> int:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    try:
+        return int(v)
+    except ValueError:
+        return default
+
+
 def _get_str(name: str, default: str = "") -> str:
     v = os.getenv(name)
     if v is None:
@@ -42,3 +52,8 @@ STOP_LOSS_PCT = _get_float("STOP_LOSS_PCT", 0.02)
 BACKTEST_START = _get_str("BACKTEST_START", "")
 BACKTEST_END = _get_str("BACKTEST_END", "")
 BACKTEST_TIMEFRAME = _get_str("BACKTEST_TIMEFRAME", "1Hour")
+
+USE_REAL_NEWS = _get_bool("USE_REAL_NEWS", False)
+NEWS_CACHE_TTL_SECONDS = _get_float("NEWS_CACHE_TTL_SECONDS", 300.0)
+NEWS_LOOKBACK_DAYS = _get_int("NEWS_LOOKBACK_DAYS", 7)
+NEWS_LIMIT = _get_int("NEWS_LIMIT", 10)
