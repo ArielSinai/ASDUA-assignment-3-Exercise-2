@@ -6,8 +6,12 @@ from typing import Dict, List, Sequence, Optional
 from algotrader.agents.market_agent import MarketAgent
 from algotrader.agents.risk_agent import RiskAgent
 from algotrader.agents.exec_agent import ExecAgent
+
+from algotrader.core.config import ALPACA_API_KEY, ALPACA_SECRET_KEY
 from algotrader.backtest.backtest_market_data import BacktestMarketData
 from algotrader.backtest.backtest_execution import BacktestExecutionClient
+from algotrader.backtest.alpaca_history import fetch_prices_by_symbol, make_week_window_utc
+from algotrader.market.market_data_alpaca import AlpacaMarketDataClient
 
 
 @dataclass(frozen=True)
@@ -72,22 +76,42 @@ def run_backtest(
 
 
 def main() -> None:
-    prices = {
-        "PLTR": [1.0, 2.0, 3.0, 2.0, 1.0],
-        "NFLX": [10.0, 10.0, 10.0, 10.0, 10.0],
-        "PLTK": [5.0, 5.0, 5.0, 5.0, 5.0],
-    }
+    symbols = ["PLTR", "NFLX", "PLTK"]
+
+    use_alpaca = bool(ALPACA_API_KEY and ALPACA_SECRET_KEY)
+
+    if use_alpaca:
+        md = AlpacaMarketDataClient(api_key=ALPACA_API_KEY, api_secret=ALPACA_SECRET_KEY)
+        window = make_week_window_utc(days=7)
+        prices = fetch_prices_by_symbol(
+            md=md,
+            symbols=symbols,
+            window=window,
+            timeframe="1Hour",
+            limit=1000,
+        )
+        source = "Alpaca (last 7 days, 1Hour bars)"
+    else:
+        prices = {
+            "PLTR": [1.0, 2.0, 3.0, 2.0, 1.0],
+            "NFLX": [10.0, 10.0, 10.0, 10.0, 10.0],
+            "PLTK": [5.0, 5.0, 5.0, 5.0, 5.0],
+        }
+        source = "Toy sample data"
 
     result = run_backtest(
         prices_by_symbol=prices,
-        symbols=["PLTR", "NFLX", "PLTK"],
-        short_window=2,
-        long_window=3,
-        threshold=0.0,
-        risk_max_position_pct=1.0,
+        symbols=symbols,
+        starting_cash=100_000.0,
+        trade_value_usd=1000.0,
+        short_window=5,
+        long_window=20,
+        threshold=0.001,
+        risk_max_position_pct=0.25,
     )
 
     print("Backtest result:")
+    print(f"  source       = {source}")
     print(f"  start_equity = {result.start_equity:.2f}")
     print(f"  end_equity   = {result.end_equity:.2f}")
     print(f"  trades       = {result.trades_executed}")
