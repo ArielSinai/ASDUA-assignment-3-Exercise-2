@@ -10,6 +10,8 @@ from algotrader.execution.execution_stub import StubExecutionClient
 
 from algotrader.data.market_data import StubMarketDataClient
 
+from algotrader.core.cache import TTLCache
+from algotrader.core.rate_limiter import RateLimiter
 from algotrader.core.config import (
     ALPACA_API_KEY,
     ALPACA_SECRET_KEY,
@@ -17,6 +19,10 @@ from algotrader.core.config import (
     MAX_EXISTING_POSITION_PCT_TO_ADD,
 )
 from algotrader.execution.execution_alpaca import AlpacaExecutionClient
+
+from algotrader.market.market_data_alpaca import AlpacaMarketDataClient
+from algotrader.market.market_data_wrapped import CachedRateLimitedMarketDataClient
+from algotrader.market.market_data_adapter import BarsToPricesAdapter
 
 
 LOG = logging.getLogger("algotrader")
@@ -27,20 +33,27 @@ def main() -> None:
 
     symbols = ["PLTR", "NFLX", "PLTK"]
 
-    md = StubMarketDataClient(
-        {
-            "PLTR": list(range(1, 51)),
-            "NFLX": list(range(50, 0, -1)),
-            "PLTK": [100, 100, 100, 100, 100],
-        }
-    )
+    use_real = bool(ALPACA_API_KEY and ALPACA_SECRET_KEY)
+
+    if use_real:
+        md_inner = AlpacaMarketDataClient(api_key=ALPACA_API_KEY, api_secret=ALPACA_SECRET_KEY)
+        cache = TTLCache()
+        rl = RateLimiter(per_second=3, per_hour=300, per_day=2000)
+        md_client = CachedRateLimitedMarketDataClient(inner=md_inner, cache=cache, rate_limiter=rl)
+        md = BarsToPricesAdapter(md_client, timeframe="1Min")
+    else:
+        md = StubMarketDataClient(
+            {
+                "PLTR": list(range(1, 51)),
+                "NFLX": list(range(50, 0, -1)),
+                "PLTK": [100, 100, 100, 100, 100],
+            }
+        )
 
     market_agent = MarketAgent(md, short_window=5, long_window=20, threshold=0.001)
     risk_agent = RiskAgent(max_position_pct=0.25)
 
-    use_real_exec = bool(ALPACA_API_KEY and ALPACA_SECRET_KEY)
-
-    if use_real_exec:
+    if use_real:
         execution_client = AlpacaExecutionClient(
             api_key=ALPACA_API_KEY,
             secret_key=ALPACA_SECRET_KEY,
@@ -50,6 +63,7 @@ def main() -> None:
         execution_client = StubExecutionClient(starting_cash=100_000.0)
 
     LOG.info("Execution client: %s", type(execution_client).__name__)
+    LOG.info("Market data: %s", type(md).__name__)
 
     exec_agent = ExecAgent(execution=execution_client, risk=risk_agent)
 
