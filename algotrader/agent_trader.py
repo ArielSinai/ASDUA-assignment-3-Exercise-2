@@ -10,7 +10,12 @@ from algotrader.execution.execution_stub import StubExecutionClient
 
 from algotrader.data.market_data import StubMarketDataClient
 
-from algotrader.core.config import ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_PAPER
+from algotrader.core.config import (
+    ALPACA_API_KEY,
+    ALPACA_SECRET_KEY,
+    ALPACA_PAPER,
+    MAX_EXISTING_POSITION_PCT_TO_ADD,
+)
 from algotrader.execution.execution_alpaca import AlpacaExecutionClient
 
 
@@ -49,6 +54,7 @@ def main() -> None:
     exec_agent = ExecAgent(execution=execution_client, risk=risk_agent)
 
     trade_value_usd = 1000.0
+    max_existing_position_pct_to_add = float(MAX_EXISTING_POSITION_PCT_TO_ADD)
 
     LOG.info("Starting agent_trader loop. Ctrl+C to exit.")
     while True:
@@ -56,9 +62,26 @@ def main() -> None:
             signal = market_agent.analyze(sym)
             LOG.info("Signal: %s", signal)
 
+            portfolio = execution_client.get_portfolio()
             pos = execution_client.get_position(sym)
-            if signal.action == "BUY" and pos is not None and pos.qty > 0:
-                LOG.info("Exec: %s", "Skipped BUY (already holding position)")
+
+            position_value = 0.0
+            if pos is not None and pos.qty > 0:
+                position_value = float(pos.qty) * float(pos.avg_entry_price)
+
+            equity = float(portfolio.equity) if portfolio.equity else 0.0
+            position_pct = (position_value / equity) if equity > 0 else 1.0
+
+            if (
+                signal.action == "BUY"
+                and pos is not None
+                and pos.qty > 0
+                and position_pct >= max_existing_position_pct_to_add
+            ):
+                LOG.info(
+                    "Exec: %s",
+                    f"Skipped BUY (position_pct={position_pct:.3f} >= {max_existing_position_pct_to_add:.3f})",
+                )
             else:
                 result = exec_agent.act(signal, trade_value=trade_value_usd)
                 LOG.info("Exec: %s", result)
