@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional, Dict, Protocol, Any
+from typing import Optional, Dict, List
 
-from algotrader.execution.execution_client import ExecutionClient, Portfolio, Position
+from algotrader.execution.execution_client import ExecutionClient, Portfolio, Position, OrderInfo
 
 
 class AlpacaExecutionClient(ExecutionClient):
@@ -47,11 +46,35 @@ class AlpacaExecutionClient(ExecutionClient):
             avg_entry_price=float(p.avg_entry_price),
         )
 
+    def list_open_orders(self, symbol: Optional[str] = None) -> List[OrderInfo]:
+        # alpaca-py: get_orders(filter=GetOrdersRequest(...)) :contentReference[oaicite:1]{index=1}
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+
+        req = GetOrdersRequest(
+            status=QueryOrderStatus.OPEN,
+            symbols=[symbol] if symbol else None,
+        )
+
+        orders = self._client.get_orders(filter=req)
+
+        out: List[OrderInfo] = []
+        for o in orders:
+            out.append(
+                OrderInfo(
+                    order_id=str(getattr(o, "id", "")),
+                    symbol=str(getattr(o, "symbol", "")),
+                    side=str(getattr(o, "side", "")),
+                    status=str(getattr(o, "status", "")),
+                    qty=float(getattr(o, "qty", 0.0)) if getattr(o, "qty", None) is not None else None,
+                    notional=float(getattr(o, "notional", 0.0)) if getattr(o, "notional", None) is not None else None,
+                )
+            )
+        return out
+
     def submit_market_order(self, symbol: str, qty: float, side: str) -> dict:
         """
-        Here we treat qty as NOTIONAL USD amount (Alpaca supports notional orders for stocks).
-        We return a small dict with order_id/status so ExecAgent can report it.
-        If you want shares-based orders instead, you'd send qty=shares and remove notional=...
+        Treat qty as NOTIONAL USD amount (Alpaca supports notional orders for stocks).
         """
         side = side.lower().strip()
         if side not in {"buy", "sell"}:
@@ -64,7 +87,7 @@ class AlpacaExecutionClient(ExecutionClient):
 
         req = MarketOrderRequest(
             symbol=symbol,
-            notional=float(qty),  # USD amount
+            notional=float(qty),
             side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
             time_in_force=TimeInForce.DAY,
         )
@@ -74,5 +97,7 @@ class AlpacaExecutionClient(ExecutionClient):
         order_id = getattr(order, "id", None)
         status = getattr(order, "status", None)
 
-        return {"order_id": str(order_id) if order_id is not None else None,
-                "status": str(status) if status is not None else None}
+        return {
+            "order_id": str(order_id) if order_id is not None else None,
+            "status": str(status) if status is not None else None,
+        }

@@ -19,9 +19,16 @@ class ExecAgent:
         self._risk = risk
 
     def act(self, signal: MarketSignal, trade_value: float) -> ExecResult:
-        # Ignore HOLD
         if signal.action == "HOLD":
             return ExecResult(False, "HOLD signal")
+
+        open_orders = self._exec.list_open_orders(signal.symbol)
+        if open_orders:
+            o = open_orders[0]
+            return ExecResult(
+                False,
+                f"Open order exists: symbol={o.symbol} side={o.side} status={o.status} id={o.order_id}"
+            )
 
         portfolio = self._exec.get_portfolio()
         pos = self._exec.get_position(signal.symbol)
