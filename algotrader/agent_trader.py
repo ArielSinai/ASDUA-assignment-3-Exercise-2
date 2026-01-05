@@ -17,19 +17,18 @@ from algotrader.core.config import (
     ALPACA_SECRET_KEY,
     ALPACA_PAPER,
     MAX_EXISTING_POSITION_PCT_TO_ADD,
+    MIN_POSITION_PCT_TO_SELL,
 )
-from algotrader.execution.execution_alpaca import AlpacaExecutionClient
+from algotrader.core.logging_config import setup_logging
 
+from algotrader.execution.execution_alpaca import AlpacaExecutionClient
 from algotrader.market.market_data_alpaca import AlpacaMarketDataClient
 from algotrader.market.market_data_wrapped import CachedRateLimitedMarketDataClient
 from algotrader.market.market_data_adapter import BarsToPricesAdapter
 
 
-LOG = logging.getLogger("algotrader")
-
-
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    LOG = setup_logging(level=logging.INFO, log_file="algotrader.log")
 
     symbols = ["PLTR", "NFLX", "PLTK"]
 
@@ -69,6 +68,7 @@ def main() -> None:
 
     trade_value_usd = 1000.0
     max_existing_position_pct_to_add = float(MAX_EXISTING_POSITION_PCT_TO_ADD)
+    min_position_pct_to_sell = float(MIN_POSITION_PCT_TO_SELL)
 
     LOG.info("Starting agent_trader loop. Ctrl+C to exit.")
     while True:
@@ -79,9 +79,19 @@ def main() -> None:
             portfolio = execution_client.get_portfolio()
             pos = execution_client.get_position(sym)
 
+            latest_price = None
+            try:
+                if hasattr(md, "get_latest_price"):
+                    latest_price = float(md.get_latest_price(sym))
+            except Exception:
+                latest_price = None
+
             position_value = 0.0
             if pos is not None and pos.qty > 0:
-                position_value = float(pos.qty) * float(pos.avg_entry_price)
+                if latest_price is not None and latest_price > 0:
+                    position_value = float(pos.qty) * float(latest_price)
+                else:
+                    position_value = float(pos.qty) * float(pos.avg_entry_price)
 
             equity = float(portfolio.equity) if portfolio.equity else 0.0
             position_pct = (position_value / equity) if equity > 0 else 1.0
@@ -96,6 +106,17 @@ def main() -> None:
                     "Exec: %s",
                     f"Skipped BUY (position_pct={position_pct:.3f} >= {max_existing_position_pct_to_add:.3f})",
                 )
+            elif (
+                signal.action == "SELL"
+                and (pos is None or pos.qty <= 0 or position_pct < min_position_pct_to_sell)
+            ):
+                if pos is None or pos.qty <= 0:
+                    LOG.info("Exec: %s", "Skipped SELL (no position)")
+                else:
+                    LOG.info(
+                        "Exec: %s",
+                        f"Skipped SELL (position_pct={position_pct:.3f} < {min_position_pct_to_sell:.3f})",
+                    )
             else:
                 result = exec_agent.act(signal, trade_value=trade_value_usd)
                 LOG.info("Exec: %s", result)
