@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import logging
 
-from algotrader.agents.market_agent import MarketAgent
+from algotrader.agents.market_agent import MarketAgent, MarketSignal
 from algotrader.agents.risk_agent import RiskAgent
 from algotrader.agents.exec_agent import ExecAgent
 from algotrader.execution.execution_stub import StubExecutionClient
@@ -70,9 +70,21 @@ def main() -> None:
     max_existing_position_pct_to_add = float(MAX_EXISTING_POSITION_PCT_TO_ADD)
     min_position_pct_to_sell = float(MIN_POSITION_PCT_TO_SELL)
 
+    cooldown_seconds = 15.0
+    cooldowns: dict[str, float] = {}
+
+    take_profit_pct = 0.03
+    stop_loss_pct = 0.02
+
     LOG.info("Starting agent_trader loop. Ctrl+C to exit.")
     while True:
         for sym in symbols:
+            now = time.time()
+            until = cooldowns.get(sym, 0.0)
+            if now < until:
+                LOG.info("Exec: %s", f"Skipped {sym} (cooldown {until - now:.1f}s remaining)")
+                continue
+
             signal = market_agent.analyze(sym)
             LOG.info("Signal: %s", signal)
 
@@ -96,6 +108,25 @@ def main() -> None:
             equity = float(portfolio.equity) if portfolio.equity else 0.0
             position_pct = (position_value / equity) if equity > 0 else 1.0
 
+            force_sell = False
+            if (
+                pos is not None
+                and pos.qty > 0
+                and latest_price is not None
+                and latest_price > 0
+                and pos.avg_entry_price > 0
+            ):
+                pnl_pct = (latest_price - float(pos.avg_entry_price)) / float(pos.avg_entry_price)
+                if pnl_pct >= take_profit_pct or pnl_pct <= -stop_loss_pct:
+                    force_sell = True
+                    signal = MarketSignal(
+                        symbol=sym,
+                        action="SELL",
+                        confidence=1.0,
+                        reason=f"TP/SL triggered (pnl_pct={pnl_pct:.3f})",
+                    )
+                    LOG.info("Signal override: %s", signal)
+
             if (
                 signal.action == "BUY"
                 and pos is not None
@@ -106,20 +137,24 @@ def main() -> None:
                     "Exec: %s",
                     f"Skipped BUY (position_pct={position_pct:.3f} >= {max_existing_position_pct_to_add:.3f})",
                 )
-            elif (
-                signal.action == "SELL"
-                and (pos is None or pos.qty <= 0 or position_pct < min_position_pct_to_sell)
-            ):
+            elif signal.action == "SELL":
                 if pos is None or pos.qty <= 0:
                     LOG.info("Exec: %s", "Skipped SELL (no position)")
-                else:
+                elif (not force_sell) and (position_pct < min_position_pct_to_sell):
                     LOG.info(
                         "Exec: %s",
                         f"Skipped SELL (position_pct={position_pct:.3f} < {min_position_pct_to_sell:.3f})",
                     )
+                else:
+                    result = exec_agent.act(signal, trade_value=trade_value_usd)
+                    LOG.info("Exec: %s", result)
+                    if result.executed:
+                        cooldowns[sym] = time.time() + cooldown_seconds
             else:
                 result = exec_agent.act(signal, trade_value=trade_value_usd)
                 LOG.info("Exec: %s", result)
+                if result.executed:
+                    cooldowns[sym] = time.time() + cooldown_seconds
 
             portfolio = execution_client.get_portfolio()
             LOG.info(
