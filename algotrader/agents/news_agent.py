@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
 
+from algotrader.agents.market_agent import MarketSignal
 from algotrader.data.news_data import NewsDataClient, NewsItem
 
 
@@ -22,10 +23,15 @@ class NewsAgent:
         news_data: NewsDataClient,
         lookback_days: int = 7,
         limit: int = 10,
+        *,
+        strong_threshold: float = 0.60,
+        min_confidence_for_signal: float = 0.60,
     ) -> None:
         self._news = news_data
         self.lookback_days = int(lookback_days)
         self.limit = int(limit)
+        self.strong_threshold = float(strong_threshold)
+        self.min_confidence_for_signal = float(min_confidence_for_signal)
 
     def analyze(self, symbol: str, *, as_of: Optional[datetime] = None) -> NewsInsight:
         if as_of is None:
@@ -62,4 +68,38 @@ class NewsAgent:
             confidence=float(confidence),
             headlines=headlines,
             reason=reason,
+        )
+
+    def generate_signal(self, symbol: str, *, as_of: Optional[datetime] = None) -> MarketSignal:
+        insight = self.analyze(symbol, as_of=as_of)
+
+        if insight.confidence < self.min_confidence_for_signal:
+            return MarketSignal(
+                symbol=symbol,
+                action="HOLD",
+                confidence=float(insight.confidence),
+                reason=insight.reason,
+            )
+
+        if insight.sentiment >= self.strong_threshold:
+            return MarketSignal(
+                symbol=symbol,
+                action="BUY",
+                confidence=max(0.0, min(1.0, float(insight.confidence))),
+                reason=f"Strong bullish news (sent={insight.sentiment:.2f}, conf={insight.confidence:.2f})",
+            )
+
+        if insight.sentiment <= -self.strong_threshold:
+            return MarketSignal(
+                symbol=symbol,
+                action="SELL",
+                confidence=max(0.0, min(1.0, float(insight.confidence))),
+                reason=f"Strong bearish news (sent={insight.sentiment:.2f}, conf={insight.confidence:.2f})",
+            )
+
+        return MarketSignal(
+            symbol=symbol,
+            action="HOLD",
+            confidence=max(0.0, min(1.0, float(insight.confidence))),
+            reason=f"News not strong enough (sent={insight.sentiment:.2f}, conf={insight.confidence:.2f})",
         )
