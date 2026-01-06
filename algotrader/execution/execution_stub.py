@@ -3,9 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Dict, Optional
 
-from algotrader.execution.execution_client import ExecutionClient, Portfolio, Position
+from algotrader.execution.execution_client import ExecutionClient, Portfolio, Position, OrderInfo
 
-from algotrader.execution.execution_client import OrderInfo
 
 class StubExecutionClient(ExecutionClient):
     def __init__(self, starting_cash: float = 100_000.0):
@@ -23,9 +22,6 @@ class StubExecutionClient(ExecutionClient):
     def get_position(self, symbol: str) -> Optional[Position]:
         return self._positions.get(symbol)
 
-    def list_open_orders(self, symbol: str) -> list[dict]:
-        return []
-
     def submit_market_order(self, symbol: str, qty: float, side: str) -> None:
         if qty <= 0:
             raise ValueError("qty must be positive")
@@ -33,6 +29,7 @@ class StubExecutionClient(ExecutionClient):
         if side not in {"buy", "sell"}:
             raise ValueError("side must be 'buy' or 'sell'")
 
+        
         price = 1.0
         cost = qty * price
 

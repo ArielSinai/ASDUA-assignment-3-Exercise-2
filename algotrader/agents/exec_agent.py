@@ -49,12 +49,18 @@ class ExecAgent:
         if signal.action == "SELL" and (pos is None or pos.qty <= 0):
             return ExecResult(False, "No position to sell")
 
+       
+        sized_value = abs(float(decision.approved_trade_value))
+
+        if sized_value <= 0:
+            return ExecResult(False, "Trade size is zero after risk sizing")
+
         side = "buy" if signal.action == "BUY" else "sell"
 
         try:
             resp = self._exec.submit_market_order(
                 signal.symbol,
-                qty=trade_value,
+                qty=sized_value,
                 side=side,
             )
 
@@ -63,10 +69,10 @@ class ExecAgent:
                 st = resp.get("status")
                 return ExecResult(
                     True,
-                    f"Submitted {side} ${trade_value:.2f} {signal.symbol} (order_id={oid}, status={st})",
+                    f"Submitted {side} ${sized_value:.2f} {signal.symbol} (order_id={oid}, status={st})",
                 )
 
-            return ExecResult(True, f"Executed {side} {trade_value:.2f} {signal.symbol}")
+            return ExecResult(True, f"Executed {side} {sized_value:.2f} {signal.symbol}")
 
         except Exception as e:
             return ExecResult(False, f"Execution error: {e}")

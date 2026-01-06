@@ -188,7 +188,11 @@ def main() -> None:
     cooldowns: dict[str, float] = {}
     trade_value_usd = 1000.0
 
-    LOG.info("NewsAgent config: strong_threshold=%.2f min_confidence=%.2f", float(NEWS_STRONG_THRESHOLD), float(NEWS_MIN_CONF_FOR_SIGNAL))
+    LOG.info(
+        "NewsAgent config: strong_threshold=%.2f min_confidence=%.2f",
+        float(NEWS_STRONG_THRESHOLD),
+        float(NEWS_MIN_CONF_FOR_SIGNAL),
+    )
     LOG.info("Execution client: %s", type(exec_client).__name__)
     LOG.info("Market data: %s", type(md).__name__)
     LOG.info("Starting agent_trader loop. Ctrl+C to exit.")
@@ -215,7 +219,13 @@ def main() -> None:
 
             if tpsl is not None:
                 signal = tpsl
-                LOG.info("TP/SL decision: sym=%s latest=%.4f action=%s reason=%s", sym, float(latest_price), signal.action, signal.reason)
+                LOG.info(
+                    "TP/SL decision: sym=%s latest=%.4f action=%s reason=%s",
+                    sym,
+                    float(latest_price),
+                    signal.action,
+                    signal.reason,
+                )
             else:
                 now_dt = datetime.now(timezone.utc)
 
@@ -248,8 +258,7 @@ def main() -> None:
                         float(market_sig.confidence),
                         market_sig.reason,
                     )
-                    insight2 = news_agent.analyze(sym, as_of=now_dt)
-                    signal = _combine_market_and_news(market_sig, insight2.sentiment, insight2.confidence)
+                    signal = _combine_market_and_news(market_sig, float(insight.sentiment), float(insight.confidence))
 
             if signal.action == "BUY":
                 position_value = 0.0 if pos is None else float(pos.qty) * float(pos.avg_entry_price)
@@ -266,7 +275,26 @@ def main() -> None:
 
             LOG.info("Signal: %s", signal)
 
-            res: ExecResult = exec_agent.act(signal, trade_value=float(trade_value_usd))
+            trade_value_to_use = float(trade_value_usd)
+
+            if signal.action == "BUY":
+                position_value = 0.0 if pos is None else float(pos.qty) * float(pos.avg_entry_price)
+
+                rd = risk_agent.approve_and_size(
+                    symbol=sym,
+                    equity=float(portfolio.equity),
+                    position_value=float(position_value),
+                    proposed_trade_value=float(trade_value_to_use),
+                )
+
+                if (not rd.allow_trade) or (float(rd.approved_trade_value) <= 0.0):
+                    LOG.info("Exec: Skipped BUY by risk sizing. reason=%s", rd.reason)
+                    cooldowns[sym] = time.time() + float(COOLDOWN_SECONDS)
+                    continue
+
+                trade_value_to_use = float(rd.approved_trade_value)
+
+            res: ExecResult = exec_agent.act(signal, trade_value=float(trade_value_to_use))
             if res.executed:
                 cooldowns[sym] = time.time() + float(COOLDOWN_SECONDS)
             LOG.info("Exec: %s", res)

@@ -20,14 +20,18 @@ class NewsDataClient(Protocol):
         *,
         as_of: datetime,
         lookback_days: int = 7,
-        limit: int = 20,
+        limit: int = 10,
     ) -> List[NewsItem]:
         ...
 
 
 class StubNewsDataClient(NewsDataClient):
-    def __init__(self, items_by_symbol: Dict[str, Sequence[NewsItem]]):
-        self._items_by_symbol = {k: list(v) for k, v in items_by_symbol.items()}
+    """In-memory stub for unit tests/dev time (no real API calls)."""
+
+    def __init__(self, items_by_symbol: Optional[Dict[str, Sequence[NewsItem]]] = None) -> None:
+        self._items_by_symbol: Dict[str, List[NewsItem]] = {
+            k: list(v) for k, v in (items_by_symbol or {}).items()
+        }
 
     def get_recent_news(
         self,
@@ -35,7 +39,7 @@ class StubNewsDataClient(NewsDataClient):
         *,
         as_of: datetime,
         lookback_days: int = 7,
-        limit: int = 20,
+        limit: int = 10,
     ) -> List[NewsItem]:
         if as_of.tzinfo is None:
             as_of = as_of.replace(tzinfo=timezone.utc)
@@ -44,9 +48,9 @@ class StubNewsDataClient(NewsDataClient):
         items = self._items_by_symbol.get(symbol, [])
 
         filtered = [
-            x for x in items
-            if (x.published_at.tzinfo is not None)
-            and (start <= x.published_at <= as_of)
+            x
+            for x in items
+            if (x.published_at.tzinfo is not None) and (start <= x.published_at <= as_of)
         ]
 
         filtered.sort(key=lambda x: x.published_at, reverse=True)
