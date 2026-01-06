@@ -34,6 +34,11 @@ from algotrader.market.market_data_alpaca import AlpacaMarketDataClient
 from algotrader.market.market_data_stub import StubMarketDataClient as BarsStubMarketDataClient
 from algotrader.market.market_data_wrapped import CachedRateLimitedMarketDataClient
 from algotrader.market.market_data_wrapped_adapter import BarsToPricesAdapter
+from typing import Protocol, runtime_checkable
+
+@runtime_checkable
+class SupportsMarketPriceUpdate(Protocol):
+    def update_market_price(self, symbol: str, price: float) -> None: ...
 
 LOG = logging.getLogger("algotrader")
 
@@ -209,6 +214,10 @@ def main() -> None:
             pos = exec_client.get_position(sym)
 
             latest_price = float(md.get_last_price(sym))
+            
+            if isinstance(exec_client, SupportsMarketPriceUpdate):
+                exec_client.update_market_price(sym, float(latest_price))
+            
             tpsl = _maybe_make_tpsl_signal(
                 symbol=sym,
                 position=pos,

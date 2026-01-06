@@ -21,16 +21,33 @@ class AlpacaExecutionClient(ExecutionClient):
     def get_portfolio(self) -> Portfolio:
         acct = self._client.get_account()
 
-        cash = float(acct.cash)
-        equity = float(acct.equity)
+        cash = float(getattr(acct, "cash", 0.0))
+        equity = float(getattr(acct, "equity", 0.0))
 
         positions: Dict[str, Position] = {}
-        for p in self._client.get_all_positions():
+        alpaca_positions = self._client.get_all_positions()
+
+        for p in alpaca_positions:
             positions[p.symbol] = Position(
                 symbol=p.symbol,
                 qty=float(p.qty),
                 avg_entry_price=float(p.avg_entry_price),
             )
+
+        if equity <= 0.0:
+            equity = cash
+            for p in alpaca_positions:
+                qty = float(p.qty)
+
+                market_value = getattr(p, "market_value", None)
+                current_price = getattr(p, "current_price", None)
+
+                if market_value is not None:
+                    equity += float(market_value)
+                elif current_price is not None:
+                    equity += qty * float(current_price)
+                else:
+                    equity += qty * float(p.avg_entry_price)
 
         return Portfolio(cash=cash, equity=equity, positions=positions)
 
@@ -47,7 +64,6 @@ class AlpacaExecutionClient(ExecutionClient):
         )
 
     def list_open_orders(self, symbol: Optional[str] = None) -> List[OrderInfo]:
-        # alpaca-py: get_orders(filter=GetOrdersRequest(...)) :contentReference[oaicite:1]{index=1}
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
 
@@ -94,10 +110,7 @@ class AlpacaExecutionClient(ExecutionClient):
 
         order = self._client.submit_order(req)
 
-        order_id = getattr(order, "id", None)
-        status = getattr(order, "status", None)
-
         return {
-            "order_id": str(order_id) if order_id is not None else None,
-            "status": str(status) if status is not None else None,
+            "order_id": str(getattr(order, "id", None)),
+            "status": str(getattr(order, "status", None)),
         }

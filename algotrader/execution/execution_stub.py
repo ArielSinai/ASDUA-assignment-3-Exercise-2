@@ -10,9 +10,21 @@ class StubExecutionClient(ExecutionClient):
     def __init__(self, starting_cash: float = 100_000.0):
         self._cash = float(starting_cash)
         self._positions: Dict[str, Position] = {}
+        # last known market price per symbol (for mark-to-market equity)
+        self._last_prices: Dict[str, float] = {}
+
+    def update_market_price(self, symbol: str, price: float) -> None:
+        """Call this from the trading loop to keep equity realistic."""
+        if price <= 0:
+            return
+        self._last_prices[symbol] = float(price)
 
     def get_portfolio(self) -> Portfolio:
         equity = self._cash
+        for sym, pos in self._positions.items():
+            px = self._last_prices.get(sym, pos.avg_entry_price)
+            equity += pos.qty * px
+
         return Portfolio(
             cash=self._cash,
             equity=equity,
@@ -29,14 +41,15 @@ class StubExecutionClient(ExecutionClient):
         if side not in {"buy", "sell"}:
             raise ValueError("side must be 'buy' or 'sell'")
 
-        
-        price = 1.0
+        # Use last market price if available; otherwise deterministic fallback.
+        price = self._last_prices.get(symbol, 1.0)
         cost = qty * price
 
         if side == "buy":
             if cost > self._cash:
                 raise ValueError("insufficient cash")
             self._cash -= cost
+
             pos = self._positions.get(symbol)
             if pos is None:
                 self._positions[symbol] = Position(symbol=symbol, qty=qty, avg_entry_price=price)
@@ -50,6 +63,7 @@ class StubExecutionClient(ExecutionClient):
             if pos is None or pos.qty < qty:
                 raise ValueError("insufficient position")
             self._cash += cost
+
             new_qty = pos.qty - qty
             if new_qty == 0:
                 del self._positions[symbol]
