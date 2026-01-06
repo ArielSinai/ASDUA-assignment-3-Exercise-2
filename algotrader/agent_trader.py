@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timezone, timedelta
+from typing import Protocol, runtime_checkable
 
 from algotrader.agents.exec_agent import ExecAgent, ExecResult
 from algotrader.agents.market_agent import MarketAgent, MarketSignal
@@ -34,11 +35,14 @@ from algotrader.market.market_data_alpaca import AlpacaMarketDataClient
 from algotrader.market.market_data_stub import StubMarketDataClient as BarsStubMarketDataClient
 from algotrader.market.market_data_wrapped import CachedRateLimitedMarketDataClient
 from algotrader.market.market_data_wrapped_adapter import BarsToPricesAdapter
-from typing import Protocol, runtime_checkable
+
+from algotrader.crew.crew_runner import CrewRunner
+
 
 @runtime_checkable
 class SupportsMarketPriceUpdate(Protocol):
     def update_market_price(self, symbol: str, price: float) -> None: ...
+
 
 LOG = logging.getLogger("algotrader")
 
@@ -190,6 +194,8 @@ def main() -> None:
     risk_agent = RiskAgent(max_position_pct=0.25)
     exec_agent = ExecAgent(execution=exec_client, risk=risk_agent)
 
+    crew_runner = CrewRunner(market_agent=market_agent, news_agent=news_agent, risk_agent=risk_agent)
+
     cooldowns: dict[str, float] = {}
     trade_value_usd = 1000.0
 
@@ -214,10 +220,10 @@ def main() -> None:
             pos = exec_client.get_position(sym)
 
             latest_price = float(md.get_last_price(sym))
-            
+
             if isinstance(exec_client, SupportsMarketPriceUpdate):
                 exec_client.update_market_price(sym, float(latest_price))
-            
+
             tpsl = _maybe_make_tpsl_signal(
                 symbol=sym,
                 position=pos,
@@ -235,39 +241,33 @@ def main() -> None:
                     signal.action,
                     signal.reason,
                 )
+                trade_value_to_use = float(trade_value_usd)
             else:
                 now_dt = datetime.now(timezone.utc)
+                position_value = 0.0 if pos is None else float(pos.qty) * float(pos.avg_entry_price)
 
-                insight = news_agent.analyze(sym, as_of=now_dt)
-                LOG.info(
-                    "News insight: sym=%s sentiment=%.2f confidence=%.2f reason=%s",
+                decision = crew_runner.decide(
                     sym,
-                    float(insight.sentiment),
-                    float(insight.confidence),
-                    insight.reason,
+                    equity=float(portfolio.equity),
+                    existing_position_value=float(position_value),
+                    default_trade_value_usd=float(trade_value_usd),
+                    as_of=now_dt,
                 )
 
-                news_sig = news_agent.generate_signal(sym, as_of=now_dt)
+                signal = decision.signal
+
                 LOG.info(
-                    "News signal: sym=%s action=%s conf=%.2f reason=%s",
+                    "Crew decision: sym=%s action=%s conf=%.2f approved_trade_value=%.2f reason=%s",
                     sym,
-                    news_sig.action,
-                    float(news_sig.confidence),
-                    news_sig.reason,
+                    signal.action,
+                    float(signal.confidence),
+                    float(decision.approved_trade_value),
+                    decision.reason,
                 )
 
-                if news_sig.action != "HOLD":
-                    signal = news_sig
-                else:
-                    market_sig = market_agent.analyze(sym)
-                    LOG.info(
-                        "Market signal: sym=%s action=%s conf=%.2f reason=%s",
-                        market_sig.symbol,
-                        market_sig.action,
-                        float(market_sig.confidence),
-                        market_sig.reason,
-                    )
-                    signal = _combine_market_and_news(market_sig, float(insight.sentiment), float(insight.confidence))
+                trade_value_to_use = float(trade_value_usd)
+                if signal.action == "BUY":
+                    trade_value_to_use = float(decision.approved_trade_value)
 
             if signal.action == "BUY":
                 position_value = 0.0 if pos is None else float(pos.qty) * float(pos.avg_entry_price)
@@ -284,24 +284,20 @@ def main() -> None:
 
             LOG.info("Signal: %s", signal)
 
-            trade_value_to_use = float(trade_value_usd)
-
-            if signal.action == "BUY":
-                position_value = 0.0 if pos is None else float(pos.qty) * float(pos.avg_entry_price)
-
-                rd = risk_agent.approve_and_size(
-                    symbol=sym,
-                    equity=float(portfolio.equity),
-                    position_value=float(position_value),
-                    proposed_trade_value=float(trade_value_to_use),
-                )
-
-                if (not rd.allow_trade) or (float(rd.approved_trade_value) <= 0.0):
-                    LOG.info("Exec: Skipped BUY by risk sizing. reason=%s", rd.reason)
-                    cooldowns[sym] = time.time() + float(COOLDOWN_SECONDS)
-                    continue
-
-                trade_value_to_use = float(rd.approved_trade_value)
+            if signal.action == "BUY" and float(trade_value_to_use) <= 0.0:
+                LOG.info("Exec: Skipped BUY (trade_value_to_use <= 0)")
+                cooldowns[sym] = time.time() + float(COOLDOWN_SECONDS)
+                continue
+            
+            if signal.action == "SELL":
+                if pos is not None and float(pos.qty) > 0:
+                    if float(pos.qty) < 2.0:
+                        LOG.info("Exec: Skipped SELL (dust position qty=%.6f)", float(pos.qty))
+                        cooldowns[sym] = time.time() + float(COOLDOWN_SECONDS)
+                        continue
+                    
+                    notional = float(pos.qty) * float(latest_price) * 0.995
+                    trade_value_to_use = round(notional, 2)
 
             res: ExecResult = exec_agent.act(signal, trade_value=float(trade_value_to_use))
             if res.executed:
