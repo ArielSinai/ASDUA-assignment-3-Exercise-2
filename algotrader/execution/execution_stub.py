@@ -10,7 +10,6 @@ class StubExecutionClient(ExecutionClient):
     def __init__(self, starting_cash: float = 100_000.0):
         self._cash = float(starting_cash)
         self._positions: Dict[str, Position] = {}
-        # last known market price per symbol (for mark-to-market equity)
         self._last_prices: Dict[str, float] = {}
 
     def update_market_price(self, symbol: str, price: float) -> None:
@@ -35,15 +34,22 @@ class StubExecutionClient(ExecutionClient):
         return self._positions.get(symbol)
 
     def submit_market_order(self, symbol: str, qty: float, side: str) -> None:
+        """
+        Submit a market order where qty is treated as NOTIONAL USD amount.
+        This matches AlpacaExecutionClient behavior for consistency.
+        """
         if qty <= 0:
             raise ValueError("qty must be positive")
         side = side.lower().strip()
         if side not in {"buy", "sell"}:
             raise ValueError("side must be 'buy' or 'sell'")
 
-        # Use last market price if available; otherwise deterministic fallback.
         price = self._last_prices.get(symbol, 1.0)
-        cost = qty * price
+        if price <= 0:
+            price = 1.0
+        
+        shares = qty / price  
+        cost = qty  
 
         if side == "buy":
             if cost > self._cash:
@@ -52,20 +58,20 @@ class StubExecutionClient(ExecutionClient):
 
             pos = self._positions.get(symbol)
             if pos is None:
-                self._positions[symbol] = Position(symbol=symbol, qty=qty, avg_entry_price=price)
+                self._positions[symbol] = Position(symbol=symbol, qty=shares, avg_entry_price=price)
             else:
-                new_qty = pos.qty + qty
-                new_avg = ((pos.qty * pos.avg_entry_price) + (qty * price)) / new_qty
+                new_qty = pos.qty + shares
+                new_avg = ((pos.qty * pos.avg_entry_price) + (shares * price)) / new_qty
                 self._positions[symbol] = replace(pos, qty=new_qty, avg_entry_price=new_avg)
 
-        else:
+        else:  
             pos = self._positions.get(symbol)
-            if pos is None or pos.qty < qty:
-                raise ValueError("insufficient position")
+            if pos is None or pos.qty < shares:
+                raise ValueError("insufficient qty available")
             self._cash += cost
 
-            new_qty = pos.qty - qty
-            if new_qty == 0:
+            new_qty = pos.qty - shares
+            if new_qty < 0.0001:  
                 del self._positions[symbol]
             else:
                 self._positions[symbol] = replace(pos, qty=new_qty)

@@ -216,10 +216,19 @@ def main() -> None:
                 LOG.info("Exec: Skipped %s (cooldown %.1fs remaining)", sym, until - now_ts)
                 continue
 
-            portfolio = exec_client.get_portfolio()
-            pos = exec_client.get_position(sym)
+            try:
+                portfolio = exec_client.get_portfolio()
+                pos = exec_client.get_position(sym)
 
-            latest_price = float(md.get_last_price(sym))
+                latest_price = float(md.get_last_price(sym))
+            except ValueError as e:
+                LOG.warning("Market data unavailable for %s: %s (skipping)", sym, e)
+                cooldowns[sym] = time.time() + 60.0  
+                continue
+            except Exception as e:
+                LOG.error("Error getting data for %s: %s (skipping)", sym, e)
+                cooldowns[sym] = time.time() + 60.0
+                continue
 
             if isinstance(exec_client, SupportsMarketPriceUpdate):
                 exec_client.update_market_price(sym, float(latest_price))
@@ -291,12 +300,14 @@ def main() -> None:
             
             if signal.action == "SELL":
                 if pos is not None and float(pos.qty) > 0:
-                    if float(pos.qty) < 2.0:
-                        LOG.info("Exec: Skipped SELL (dust position qty=%.6f)", float(pos.qty))
+                    position_value = float(pos.qty) * float(latest_price)
+                    
+                    if position_value < 10.0:
+                        LOG.info("Exec: Skipped SELL (dust position value=$%.2f)", position_value)
                         cooldowns[sym] = time.time() + float(COOLDOWN_SECONDS)
                         continue
                     
-                    notional = float(pos.qty) * float(latest_price) * 0.995
+                    notional = position_value * 0.995
                     trade_value_to_use = round(notional, 2)
 
             res: ExecResult = exec_agent.act(signal, trade_value=float(trade_value_to_use))
