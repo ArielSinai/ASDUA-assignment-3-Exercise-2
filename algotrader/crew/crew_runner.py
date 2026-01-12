@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
+from crewai import Agent, Task, Crew
+from crewai.tools import tool
 
 from algotrader.agents.market_agent import MarketAgent, MarketSignal
 from algotrader.agents.news_agent import NewsAgent, NewsInsight
@@ -31,6 +33,82 @@ class CrewRunner:
         self._risk = risk_agent
         self._score_hold_threshold = float(score_hold_threshold)
         self._news_weight = float(news_weight)
+        
+        self._crew = self._create_crew()
+    
+    def _create_crew(self) -> Crew:
+        from algotrader.tools.momentum_tool import analyze_momentum
+        
+        @tool("analyze_market_technicals")
+        def analyze_market_technicals(symbol: str) -> str:
+            """Analyze technical indicators and moving averages for a stock symbol."""
+            sig = self._market.analyze(symbol)
+            return f"Action: {sig.action}, Confidence: {sig.confidence:.2f}, Reason: {sig.reason}"
+        
+        @tool("analyze_news_sentiment")
+        def analyze_news_sentiment(symbol: str) -> str:
+            """Analyze recent news sentiment for a stock symbol."""
+            insight = self._news.analyze(symbol)
+            return f"Sentiment: {insight.sentiment:.2f}, Confidence: {insight.confidence:.2f}, Reason: {insight.reason}"
+        
+        @tool("calculate_position_sizing")
+        def calculate_position_sizing(equity: float, position_value: float, trade_value: float) -> str:
+            """Calculate appropriate position size based on risk parameters."""
+            rd = self._risk.approve_and_size(
+                symbol="TEMP",
+                equity=equity,
+                position_value=position_value,
+                proposed_trade_value=trade_value,
+            )
+            return f"Allowed: {rd.allow_trade}, Approved: ${rd.approved_trade_value:.2f}, Reason: {rd.reason}"
+        
+        @tool("analyze_momentum")
+        def momentum_analysis(symbol: str) -> str:
+            """Analyze price momentum and RSI for a stock symbol."""
+            prices = self._market._md.get_recent_prices(symbol, 30)
+            result = analyze_momentum(symbol, prices)
+            return f"Trend: {result.trend}, RSI: {result.rsi:.1f}, Momentum: {result.momentum_score:.2f}%, Reason: {result.reason}"
+        
+        market_analyst = Agent(
+            role="Market Technical Analyst",
+            goal="Analyze price movements and provide trading signals based on technical indicators",
+            backstory="Expert in moving averages and technical analysis patterns",
+            tools=[analyze_market_technicals, momentum_analysis],
+            verbose=False,
+            allow_delegation=False,
+        )
+        
+        news_analyst = Agent(
+            role="News Sentiment Analyst",
+            goal="Analyze news sentiment and provide insights on market mood",
+            backstory="Specialist in parsing financial news and extracting sentiment signals",
+            tools=[analyze_news_sentiment],
+            verbose=False,
+            allow_delegation=False,
+        )
+        
+        risk_manager = Agent(
+            role="Risk Manager",
+            goal="Ensure trades stay within risk limits and calculate appropriate position sizes",
+            backstory="Conservative risk manager focused on capital preservation",
+            tools=[calculate_position_sizing],
+            verbose=False,
+            allow_delegation=False,
+        )
+        
+        coordinator = Agent(
+            role="Trading Coordinator",
+            goal="Synthesize all agent inputs and make final trading decision",
+            backstory="Senior trader who combines technical, sentiment, and risk analysis into actionable trades",
+            verbose=False,
+            allow_delegation=True,
+        )
+        
+        return Crew(
+            agents=[market_analyst, news_analyst, risk_manager, coordinator],
+            tasks=[],
+            verbose=False,
+        )
 
     def decide(
         self,
@@ -62,7 +140,6 @@ class CrewRunner:
             default_trade_value_usd=float(default_trade_value_usd),
         )
 
-        # Risk is part of the crew decision. Use the real API you have: approve_and_size().
         rd: RiskDecision = self._risk.approve_and_size(
             symbol=symbol,
             equity=float(equity),
@@ -87,7 +164,6 @@ class CrewRunner:
             reason = f"{base_signal.reason} | risk={rd.reason} | approved_value={approved_value:.2f}"
             return CrewDecision(symbol=symbol, signal=base_signal, approved_trade_value=approved_value, reason=reason)
 
-        # SELL: keep it simple and sell the full position if exists; risk sizing isn't needed for SELL in your current flow.
         sell_value = float(proposed)
         reason = base_signal.reason
         return CrewDecision(symbol=symbol, signal=base_signal, approved_trade_value=sell_value, reason=reason)
