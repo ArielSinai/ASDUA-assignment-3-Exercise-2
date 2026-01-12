@@ -194,10 +194,10 @@ def main() -> None:
     risk_agent = RiskAgent(max_position_pct=0.25)
     exec_agent = ExecAgent(execution=exec_client, risk=risk_agent)
 
-    crew_runner = CrewRunner(market_agent=market_agent, news_agent=news_agent, risk_agent=risk_agent)
+    crew_runner = CrewRunner(market_agent=market_agent, news_agent=news_agent, risk_agent=risk_agent, score_hold_threshold=0.15)
 
     cooldowns: dict[str, float] = {}
-    trade_value_usd = 1000.0
+    trade_value_usd = 2500.0
 
     LOG.info(
         "NewsAgent config: strong_threshold=%.2f min_confidence=%.2f",
@@ -302,7 +302,7 @@ def main() -> None:
                 if pos is not None and float(pos.qty) > 0:
                     position_value = float(pos.qty) * float(latest_price)
                     
-                    if position_value < 10.0:
+                    if position_value < 1.0:
                         LOG.info("Exec: Skipped SELL (dust position value=$%.2f)", position_value)
                         cooldowns[sym] = time.time() + float(COOLDOWN_SECONDS)
                         continue
