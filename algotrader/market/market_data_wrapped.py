@@ -14,8 +14,8 @@ class CachedRateLimitedMarketDataClient(MarketDataClient):
         inner: MarketDataClient,
         cache: TTLCache,
         rate_limiter: RateLimiter,
-        cache_ttl_seconds_latest_price: float = 2.0,  
-        cache_ttl_seconds_bars: float = 60.0,          
+        cache_ttl_seconds_latest_price: float = 2.0,
+        cache_ttl_seconds_bars: float = 60.0,
         limiter_key_prefix: str = "marketdata",
     ) -> None:
         self._inner = inner
@@ -30,7 +30,10 @@ class CachedRateLimitedMarketDataClient(MarketDataClient):
 
         def supplier() -> float:
             self._rl.acquire(f"{self._prefix}:latest_price:{symbol}")
-            return float(self._inner.get_latest_price(symbol))
+            price = self._inner.get_latest_price(symbol)
+            if price is None:  
+                raise ValueError(f"No latest price for {symbol}")
+            return float(price)
 
         return float(self._cache.get_or_set(key, ttl_seconds=self._ttl_price, supplier=supplier))
 
@@ -49,6 +52,9 @@ class CachedRateLimitedMarketDataClient(MarketDataClient):
 
         def supplier() -> List[Bar]:
             self._rl.acquire(f"{self._prefix}:bars:{symbol}:{timeframe}")
-            return list(self._inner.get_bars(symbol, timeframe, limit=limit, start_iso=start_iso, end_iso=end_iso))
+            bars = self._inner.get_bars(symbol, timeframe, limit=limit, start_iso=start_iso, end_iso=end_iso)
+            if bars is None: 
+                return []
+            return list(bars)
 
         return list(self._cache.get_or_set(key, ttl_seconds=self._ttl_bars, supplier=supplier))
