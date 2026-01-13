@@ -330,4 +330,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        LOG.info("User requested exit. Shutting down gracefully.")
+        import sys
+        sys.exit(0)
