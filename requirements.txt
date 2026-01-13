@@ -4,3 +4,6 @@ crewai
 litellm
 alpaca-py
 python-dotenv
+numpy
+scikit-learn
+tensorflow
