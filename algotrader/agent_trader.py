@@ -197,7 +197,7 @@ def main() -> None:
     crew_runner = CrewRunner(market_agent=market_agent, news_agent=news_agent, risk_agent=risk_agent, score_hold_threshold=0.15)
 
     cooldowns: dict[str, float] = {}
-    trade_value_usd = 2500.0
+    trade_value_usd = 10000.0
 
     LOG.info(
         "NewsAgent config: strong_threshold=%.2f min_confidence=%.2f",
