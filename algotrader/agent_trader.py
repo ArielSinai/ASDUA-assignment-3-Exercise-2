@@ -44,6 +44,16 @@ class SupportsMarketPriceUpdate(Protocol):
     def update_market_price(self, symbol: str, price: float) -> None: ...
 
 
+def _is_market_open(exec_client) -> bool:
+    try:
+        if hasattr(exec_client, 'get_clock'):
+            clock = exec_client.get_clock()
+            return clock.is_open
+    except Exception:
+        pass
+    return True
+
+
 LOG = logging.getLogger("algotrader")
 
 
@@ -209,6 +219,11 @@ def main() -> None:
     LOG.info("Starting agent_trader loop. Ctrl+C to exit.")
 
     while True:
+        if use_real_exec and not _is_market_open(exec_client):
+            LOG.info("Market closed, sleeping 60s")
+            time.sleep(60)
+            continue
+        
         for sym in symbols:
             now_ts = time.time()
             until = cooldowns.get(sym, 0.0)

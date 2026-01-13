@@ -18,6 +18,9 @@ class AlpacaExecutionClient(ExecutionClient):
 
         self._client = TradingClient(api_key, secret_key, paper=paper)
 
+    def get_clock(self):
+        return self._client.get_clock()
+
     def get_portfolio(self) -> Portfolio:
         acct = self._client.get_account()
 
