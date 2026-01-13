@@ -8,6 +8,7 @@ from crewai.tools import tool
 from algotrader.agents.market_agent import MarketAgent, MarketSignal
 from algotrader.agents.news_agent import NewsAgent, NewsInsight
 from algotrader.agents.risk_agent import RiskAgent, RiskDecision
+from algotrader.agents.ml_predictor_agent import MLPredictorAgent
 
 
 @dataclass(frozen=True)
@@ -25,12 +26,14 @@ class CrewRunner:
         market_agent: MarketAgent,
         news_agent: NewsAgent,
         risk_agent: RiskAgent,
+        ml_agent: Optional[MLPredictorAgent] = None,
         score_hold_threshold: float = 0.35,
         news_weight: float = 1.20,
     ) -> None:
         self._market = market_agent
         self._news = news_agent
         self._risk = risk_agent
+        self._ml = ml_agent or MLPredictorAgent()
         self._score_hold_threshold = float(score_hold_threshold)
         self._news_weight = float(news_weight)
         
@@ -69,6 +72,13 @@ class CrewRunner:
             result = analyze_momentum(symbol, prices)
             return f"Trend: {result.trend}, RSI: {result.rsi:.1f}, Momentum: {result.momentum_score:.2f}%, Reason: {result.reason}"
         
+        @tool("predict_price_ml")
+        def predict_price_ml(symbol: str) -> str:
+            """Predict future price using ML model (LSTM) based on recent price history."""
+            prices = self._market._md.get_recent_prices(symbol, 30)
+            pred = self._ml.predict(symbol, prices)
+            return f"Predicted: ${pred.predicted_price:.2f}, Confidence: {pred.confidence:.2f}, Direction: {pred.direction}, Reason: {pred.reason}"
+        
         market_analyst = Agent(
             role="Market Technical Analyst",
             goal="Analyze price movements and provide trading signals based on technical indicators",
@@ -96,6 +106,15 @@ class CrewRunner:
             allow_delegation=False,
         )
         
+        ml_analyst = Agent(
+            role="ML Price Predictor",
+            goal="Predict future price movements using machine learning models",
+            backstory="Data scientist specialized in LSTM neural networks for price prediction",
+            tools=[predict_price_ml],
+            verbose=False,
+            allow_delegation=False,
+        )
+        
         coordinator = Agent(
             role="Trading Coordinator",
             goal="Synthesize all agent inputs and make final trading decision",
@@ -105,7 +124,7 @@ class CrewRunner:
         )
         
         return Crew(
-            agents=[market_analyst, news_analyst, risk_manager, coordinator],
+            agents=[market_analyst, news_analyst, risk_manager, ml_analyst, coordinator],
             tasks=[],
             verbose=False,
         )
